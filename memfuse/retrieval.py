@@ -52,31 +52,26 @@ class BasicRetrievalStrategy:
     ) -> List[RetrievedChunk]:
         rows: list[tuple[str, str, float]] = []
         structured_rows: list[tuple[str, str, float]] = []
+
+        # Compute query embedding once and reuse across structured + unstructured retrieval
+        query_embedding: List[float] | None = None
+        try:
+            query_embedding = self.embedder.embed([user_query])[0]
+        except Exception:
+            query_embedding = None
+
         # 2.1 Structured retrieval (exact-ish) if enabled
         if getattr(self.settings, "structured_enabled", False):
             try:
                 k_struct = getattr(self.settings, "structured_top_k", 0) or (self.settings.rag_top_k * 2)
-                # Prefer vector similarity over existing structured fact embeddings if available
-                qvec = None
-                try:
-                    qvec = self.embedder.embed([user_query])[0]
-                except Exception:
-                    qvec = None
-                if qvec is not None:
-                    structured_rows = self.db.query_structured_similar(session_id, qvec, k_struct)
+                if query_embedding is not None:
+                    structured_rows = self.db.query_structured_similar(session_id, query_embedding, k_struct)
                 # If vector returns empty (e.g., no embeddings yet), fallback to keyword query
                 if not structured_rows:
                     keywords = self._extract_keywords(user_query)
                     structured_rows = self.db.query_structured_by_keywords(session_id, keywords, k_struct)
             except Exception:
                 structured_rows = []
-
-        # 2.2 Vector retrieval with safe session detection
-        query_embedding: List[float] | None = None
-        try:
-            query_embedding = self.embedder.embed([user_query])[0]
-        except Exception:
-            query_embedding = None
 
         prefer_session = self.settings.retrieval_prefer_session
         has_session_chunks = False
