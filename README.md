@@ -1,4 +1,4 @@
-MemFuse MVP - Phase 1
+MemFuse MVP - Phase 1 → Phase 2 Ready
 
 Prerequisites
 - Poetry (Python 3.11)
@@ -42,6 +42,25 @@ Usage
   #   OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_COMPATIBLE_MODEL
   ```
 
+Phase 2 (Structured Memory) quick start
+- Enable M2 in `.env`:
+  ```bash
+  STRUCTURED_ENABLED=true
+  EXTRACTOR_ENABLED=true
+  ```
+- Ensure DB is (re)initialized with structured schema:
+  ```bash
+  scripts/start.sh --reset
+  ```
+- Verify extractor batching and flags:
+  ```bash
+  poetry run python scripts/test_m2_extractor.py
+  ```
+- Verify facts recall path (vector search over structured facts):
+  ```bash
+  poetry run python scripts/test_facts_recall.py
+  ```
+
 Notes on performance & robustness
 - Ingestion and session indexing are idempotent by content hash. Re-ingesting or re-chatting will not duplicate vector rows.
 - DB schema creates a unique index on `(document_source, content_hash)` under `documents_chunks`.
@@ -75,6 +94,9 @@ End-to-end checklist
 - Ingest content: `poetry run memfuse ingest seed ./sample.txt`
 - Verify retrieval: `poetry run memfuse debug sess1 "Why did we choose Plan B?"`
 - Chat: `poetry run memfuse chat sess1 "Why did we choose Plan B?"`
+- (M2) Verify extractor & structured recall:
+  - `poetry run python scripts/test_m2_extractor.py`
+  - `poetry run python scripts/test_m2_dedup_contradiction.py`
 - Verify memory persisted (optional):
   ```bash
   docker exec memfuse_db psql -U ${POSTGRES_USER:-memfuse} -d ${POSTGRES_DB:-memfuse} -c \
@@ -88,6 +110,7 @@ Notes
   - `HISTORY_MAX_TOKENS` controls how much history is included
 - Retrieval ordering uses cosine similarity on pgvector.
 - If retrieval ever returns 0 unexpectedly with very small datasets, the code falls back to sequential scan (disables index/bitmap scan) to avoid ivfflat edge-cases during MVP.
+ - Structured retrieval merges exact-ish facts (by vector/keywords) with unstructured chunks first, aligning with PRD Stage 2.
 
 Testing
 ```bash
