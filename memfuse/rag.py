@@ -9,6 +9,7 @@ from .db import Database
 from .embeddings import JinaEmbeddingClient
 from .llm import ChatLLM
 from .context import ContextController, RetrievedChunk
+from .tracing import ContextTrace
 
 
 @dataclass
@@ -41,7 +42,7 @@ class RAGService:
             )
         return len(chunks)
 
-    def chat(self, session_id: str, user_query: str) -> str:
+    def chat(self, session_id: str, user_query: str, trace: ContextTrace | None = None) -> str:
         # Step 1: history truncation (load recent history; exact token truncation occurs in ContextController)
         history = self.db.fetch_conversation_history(session_id=session_id)
 
@@ -51,7 +52,7 @@ class RAGService:
         retrieved = [RetrievedChunk(content=r[0], source=r[1], score=r[2]) for r in rows]
 
         # Step 3: context construction
-        messages = self.context.build_final_context(user_query, history, retrieved)
+        messages = self.context.build_final_context(user_query, history, retrieved, trace=trace)
 
         # Step 4: LLM call
         answer = self.llm.chat(system_prompt=self.settings.system_prompt, messages=messages)

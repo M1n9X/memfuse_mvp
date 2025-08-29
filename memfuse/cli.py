@@ -21,7 +21,8 @@ def main() -> None:
 
     chat = sub.add_parser("chat", help="Start a chat turn")
     chat.add_argument("session", help="Session id")
-    chat.add_argument("query", help="User query")
+    chat.add_argument("query", help="User query or '-' for interactive mode")
+    chat.add_argument("--verbose", action="store_true", help="Show detailed context operations")
 
     debug = sub.add_parser("debug", help="Debug retrieval and context (no LLM call)")
     debug.add_argument("session", help="Session id")
@@ -55,13 +56,36 @@ def main() -> None:
                 if user_q.strip() in {"/exit", ":q", "/quit"}:
                     console.print("[dim]Bye[/dim]")
                     break
+                # Build optional trace
+                from .tracing import ContextTrace
+                trace = ContextTrace() if args.verbose else None
                 # Call non-streaming backend for now; print as streaming chunks
                 try:
-                    answer = service.chat(args.session, user_q)
+                    answer = service.chat(args.session, user_q, trace=trace)
                 except Exception as e:
                     console.print(f"[red]Chat failed:[/red] {e}")
                     continue
+                # Verbose context operations
+                if args.verbose and trace is not None:
+                    console.rule("Context Operations")
+                    if trace.user_truncated:
+                        console.print(f"[yellow]User input truncated:[/yellow] {trace.user_tokens_before} -> {trace.user_tokens_after}")
+                    if trace.history_truncated:
+                        console.print(f"[yellow]History truncated:[/yellow] {trace.history_tokens_before} -> {trace.history_tokens_after} tokens; kept rounds {trace.history_rounds_after}/{trace.history_rounds_before}")
+                        # Show a compact summary of dropped content (first line only)
+                        for rid, spk, cont in trace.dropped_messages[:3]:
+                            preview = cont.split('\n',1)[0]
+                            if len(preview) > 120:
+                                preview = preview[:120] + '...'
+                            console.print(f"[dim]Dropped {spk}#{rid}:[/dim] {preview}")
+                    if trace.retrieved_count:
+                        console.print(f"Retrieved top-{trace.retrieved_count} chunks:")
+                        for src, score in trace.retrieved_preview:
+                            console.print(f"  [dim]{src}[/dim] score={score:.3f}")
+                    console.print(f"Final messages: {trace.final_messages_count}, token~={trace.final_tokens_estimate}")
+                    console.rule()
                 # Fake streaming: chunk the answer for UX
+                console.print("[bold magenta]Chatbot>[/bold magenta] ", end="")
                 for part in answer.split():
                     console.print(part + " ", end="", style="yellow")
                     console.file.flush()
@@ -72,7 +96,8 @@ def main() -> None:
             except Exception as e:
                 print(f"Chat failed: {e}", file=sys.stderr)
                 sys.exit(2)
-            print(answer)
+            console = Console()
+            console.print("[bold magenta]Chatbot>[/bold magenta] " + answer)
     elif args.cmd == "debug":
         # Step 1: history
         history = service.db.fetch_conversation_history(session_id=args.session)
