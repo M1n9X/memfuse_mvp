@@ -68,6 +68,26 @@ def main() -> None:
                 # Verbose context operations
                 if args.verbose and trace is not None:
                     console.rule("Context Operations")
+                    # Show full assembled context blocks
+                    from textwrap import shorten
+                    # System prompt (from settings)
+                    from .config import Settings as _S
+                    sp = _S.from_env().system_prompt
+                    console.print("[bold]System Prompt[/bold]\n" + sp)
+                    # User input
+                    console.print("\n[bold]User Query[/bold]\n" + user_q)
+                    # Retrieved
+                    if trace.retrieved_block_content:
+                        console.print("\n[bold]Retrieved Chunks[/bold]\n" + trace.retrieved_block_content)
+                    # History kept
+                    if trace.history_rounds_after:
+                        console.print(f"\n[bold]History (kept {trace.history_rounds_after} rounds)[/bold]")
+                        # Print last few kept messages from final_messages
+                        kept = [m for m in trace.final_messages if m.get('role') in {'user','ai'}]
+                        for m in kept[-6:]:
+                            who = 'You' if m['role']=='user' else 'Chatbot'
+                            preview = m.get('content','')
+                            console.print(f"[dim]{who}>[/dim] {preview}")
                     if trace.user_truncated:
                         console.print(f"[yellow]User input truncated:[/yellow] {trace.user_tokens_before} -> {trace.user_tokens_after}")
                     if trace.history_truncated:
@@ -78,6 +98,9 @@ def main() -> None:
                             if len(preview) > 120:
                                 preview = preview[:120] + '...'
                             console.print(f"[dim]Dropped {spk}#{rid}:[/dim] {preview}")
+                    if trace.summary_added:
+                        console.print("[green]Added compressed history summary[/green]")
+                        console.print(trace.summary_text)
                     if trace.retrieved_count:
                         console.print(f"Retrieved top-{trace.retrieved_count} chunks:")
                         for src, score in trace.retrieved_preview:

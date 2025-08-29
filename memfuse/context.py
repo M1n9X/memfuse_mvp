@@ -19,6 +19,25 @@ class ContextController:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
 
+    def _summarize_dropped_messages(self, dropped: List[Tuple[int, str, str]], max_tokens: int = 256) -> str:
+        # Naive summary: take first sentence or up to 30 words from each dropped message
+        # and join as bullet points. Then enforce token cap.
+        bullets: list[str] = []
+        for (_rid, speaker, content) in dropped:
+            text = content.strip().split('\n', 1)[0]
+            # split by typical sentence enders
+            for sep in ['。', '！', '？', '.', '!', '?']:
+                if sep in text:
+                    text = text.split(sep)[0] + sep
+                    break
+            words = text.split()
+            if len(words) > 30:
+                text = ' '.join(words[:30]) + '...'
+            label = 'User' if speaker == 'user' else 'AI'
+            bullets.append(f"- {label}: {text}")
+        combined = "History summary (compressed):\n" + "\n".join(bullets[:10])
+        return truncate_by_tokens(combined, max_tokens)
+
     def build_final_context(
         self,
         user_query: str,
@@ -67,6 +86,7 @@ class ContextController:
             trace.retrieved_top_k = len(retrieved_chunks)
             trace.retrieved_count = len(retrieved_chunks)
             trace.retrieved_preview = [(c.source, c.score) for c in retrieved_chunks[:5]]
+            trace.retrieved_block_content = retrieved_block["content"]
 
         # Per PRD: final_context = user_query + retrieved_chunks + conversation_history + system_prompt
         # We'll structure messages accordingly before passing to LLM wrapper (which prepends system prompt).
@@ -74,6 +94,17 @@ class ContextController:
             {"role": "user", "content": user_query_text},
             retrieved_block,
         ] + history_messages
+
+        # If history was truncated, add a compressed summary of dropped content
+        if trace is not None and trace.history_truncated and trace.dropped_messages:
+            summary_text = self._summarize_dropped_messages(trace.dropped_messages)
+            if summary_text:
+                summary_block = {"role": "system", "content": summary_text}
+                # Insert after retrieved block
+                candidate.insert(2, summary_block)
+                trace.summary_added = True
+                trace.summary_text = summary_text
+                trace.summary_tokens = count_tokens(summary_text)
 
         # Trim to total context limit
         while self._messages_token_count(candidate) > self.settings.total_context_max_tokens:
@@ -84,6 +115,9 @@ class ContextController:
                     {"role": "user", "content": user_query_text},
                     retrieved_block,
                 ] + history_messages
+                # If a summary was added earlier, ensure it remains right after retrieved block
+                if trace is not None and trace.summary_added:
+                    candidate = [candidate[0], candidate[1], {"role": "system", "content": trace.summary_text}] + candidate[2:]
             else:
                 # As a last resort, truncate retrieved_block and user content further
                 retrieved_block["content"] = truncate_by_tokens(
@@ -97,11 +131,14 @@ class ContextController:
                     {"role": "user", "content": user_query_text},
                     retrieved_block,
                 ]
+                if trace is not None and trace.summary_added:
+                    candidate.append({"role": "system", "content": trace.summary_text})
                 break
 
         if trace is not None:
             trace.final_messages_count = len(candidate)
             trace.final_tokens_estimate = self._messages_token_count(candidate)
+            trace.final_messages = candidate.copy()
 
         return candidate
 

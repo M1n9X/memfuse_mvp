@@ -15,6 +15,7 @@ class ChatLLM:
         else:
             self.client = OpenAI(api_key=settings.openai_api_key)
         self.model = settings.openai_model
+        self.system_prompt_text = settings.system_prompt
 
     def chat(self, system_prompt: str, messages: List[dict]) -> str:
         # messages: list of {role, content}

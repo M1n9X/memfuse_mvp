@@ -30,7 +30,10 @@ class ContextTrace:
     retrieved_top_k: int = 0
     retrieved_count: int = 0
     retrieved_preview: List[Tuple[str, float]] = field(default_factory=list)  # (source, score)
+    retrieved_block_content: str = ""
 
     # Final context
     final_messages_count: int = 0
     final_tokens_estimate: int = 0
+    final_messages: List[dict] = field(default_factory=list)
+    system_prompt_text: str = ""
