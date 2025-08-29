@@ -275,7 +275,7 @@ class Database:
         """Vector similarity search over structured facts for dedup/contradiction detection."""
         sql = (
             "WITH q AS (SELECT %s::vector AS v) "
-            "SELECT content, type, 1 - (embedding <=> q.v) AS cosine_similarity "
+            "SELECT content, type, source_round_id, 1 - (embedding <=> q.v) AS cosine_similarity "
             "FROM structured_memory, q WHERE session_id = %s AND embedding IS NOT NULL "
             "ORDER BY embedding <=> q.v ASC LIMIT %s"
         )
@@ -287,4 +287,4 @@ class Database:
                 pass
             cur.execute(sql, (vec, session_id, top_k))
             rows = cur.fetchall()
-            return [(str(r[0]), f"structured:{str(r[1])}", float(r[2])) for r in rows]
+            return [(str(r[0]), f"structured:{str(r[1])}#round={int(r[2])}", float(r[3])) for r in rows]

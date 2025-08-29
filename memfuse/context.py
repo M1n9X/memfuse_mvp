@@ -99,6 +99,10 @@ class ContextController:
             trace.retrieved_count = len(retrieved_chunks)
             trace.retrieved_preview = [(c.source, c.score) for c in retrieved_chunks[:5]]
             trace.retrieved_block_content = retrieved_block["content"]
+            trace.retrieved_facts_count = len(structured)
+            trace.retrieved_chunks_count = len(unstructured)
+            trace.retrieved_facts_preview = [(c.source, c.score) for c in structured[:5]]
+            trace.retrieved_chunks_preview = [(c.source, c.score) for c in unstructured[:5]]
 
         # Build blocks: system(retrieved), optional system(summary), history, user
         prefix_blocks: list[dict] = []

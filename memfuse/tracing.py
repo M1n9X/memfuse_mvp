@@ -32,6 +32,10 @@ class ContextTrace:
     retrieved_count: int = 0
     retrieved_preview: List[Tuple[str, float]] = field(default_factory=list)  # (source, score)
     retrieved_block_content: str = ""
+    retrieved_facts_count: int = 0
+    retrieved_chunks_count: int = 0
+    retrieved_facts_preview: List[Tuple[str, float]] = field(default_factory=list)
+    retrieved_chunks_preview: List[Tuple[str, float]] = field(default_factory=list)
 
     # Final context
     final_messages_count: int = 0

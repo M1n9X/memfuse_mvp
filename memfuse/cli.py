@@ -82,10 +82,9 @@ def main() -> None:
                     console.print(Panel(sp, title="[bold blue]System Prompt[/bold blue]", border_style="blue"))
                     # User input
                     console.print(Panel(user_q, title="[bold cyan]User Query[/bold cyan]", border_style="cyan"))
-                    # Retrieved
-                    # Retrieved Chunks panel (always show, even if empty)
+                    # Retrieved (facts + chunks)
                     retrieved_content = trace.retrieved_block_content or "<none>"
-                    rc_title = f"[bold green]Retrieved Chunks[/bold green] (top {trace.retrieved_count})"
+                    rc_title = f"[bold green]Retrieved[/bold green] (facts={trace.retrieved_facts_count}, chunks={trace.retrieved_chunks_count})"
                     console.print(Panel(retrieved_content, title=rc_title, border_style="green"))
                     # History kept (show exactly what's kept, not meta)
                     if trace.history_rounds_after:
@@ -108,10 +107,15 @@ def main() -> None:
                     if trace.summary_added:
                         console.print("[green]Added compressed history summary[/green]")
                         console.print(trace.summary_text)
-                    if trace.retrieved_count:
-                        console.print(f"Retrieved top-{trace.retrieved_count} chunks:")
-                        for src, score in trace.retrieved_preview:
-                            console.print(f"  [dim]{src}[/dim] score={score:.3f}")
+                    if trace.retrieved_facts_count or trace.retrieved_chunks_count:
+                        if trace.retrieved_facts_count:
+                            console.print(f"Retrieved facts: {trace.retrieved_facts_count}")
+                            for src, score in trace.retrieved_facts_preview:
+                                console.print(f"  [dim]{src}[/dim] score={score:.3f}")
+                        if trace.retrieved_chunks_count:
+                            console.print(f"Retrieved chunks: {trace.retrieved_chunks_count}")
+                            for src, score in trace.retrieved_chunks_preview:
+                                console.print(f"  [dim]{src}[/dim] score={score:.3f}")
                     console.print(f"Final messages: {trace.final_messages_count}, token~={trace.final_tokens_estimate}")
                     # Final Context panel
                     fc_lines = ["(System prompt is prepended separately; shown above)"]

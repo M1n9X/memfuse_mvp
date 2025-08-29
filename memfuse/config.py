@@ -81,7 +81,7 @@ class Settings:
                 ),
             ),
             structured_enabled=(os.getenv("STRUCTURED_ENABLED", "false").lower() in {"1","true","yes","y"}),
-            structured_top_k=int(os.getenv("STRUCTURED_TOP_K", "5")),
+            structured_top_k=int(os.getenv("STRUCTURED_TOP_K", "10")),
             extractor_enabled=(os.getenv("EXTRACTOR_ENABLED", "false").lower() in {"1","true","yes","y"}),
             extractor_trigger_tokens=int(os.getenv("EXTRACTOR_TRIGGER_TOKENS", "2000")),
             extractor_dedup_top_k=int(os.getenv("EXTRACTOR_DEDUP_TOP_K", "10")),

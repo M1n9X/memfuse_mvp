@@ -54,10 +54,20 @@ class BasicRetrievalStrategy:
         structured_rows: list[tuple[str, str, float]] = []
         # 2.1 Structured retrieval (exact-ish) if enabled
         if getattr(self.settings, "structured_enabled", False):
-            keywords = self._extract_keywords(user_query)
             try:
                 k_struct = getattr(self.settings, "structured_top_k", 0) or (self.settings.rag_top_k * 2)
-                structured_rows = self.db.query_structured_by_keywords(session_id, keywords, k_struct)
+                # Prefer vector similarity over existing structured fact embeddings if available
+                qvec = None
+                try:
+                    qvec = self.embedder.embed([user_query])[0]
+                except Exception:
+                    qvec = None
+                if qvec is not None:
+                    structured_rows = self.db.query_structured_similar(session_id, qvec, k_struct)
+                # If vector returns empty (e.g., no embeddings yet), fallback to keyword query
+                if not structured_rows:
+                    keywords = self._extract_keywords(user_query)
+                    structured_rows = self.db.query_structured_by_keywords(session_id, keywords, k_struct)
             except Exception:
                 structured_rows = []
 
