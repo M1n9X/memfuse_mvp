@@ -7,6 +7,14 @@ CREATE TABLE IF NOT EXISTS conversations (
   PRIMARY KEY (session_id, round_id, speaker)
 );
 
+-- Phase 2: track whether a round has been extracted into structured memory.
+-- We mark the 'ai' message row for each round; 'user' rows are ignored for this flag.
+ALTER TABLE conversations
+  ADD COLUMN IF NOT EXISTS is_extracted BOOLEAN NOT NULL DEFAULT FALSE;
+CREATE INDEX IF NOT EXISTS idx_conversations_extracted
+  ON conversations (session_id, round_id)
+  WHERE speaker = 'ai' AND is_extracted = FALSE;
+
 -- Document chunks for RAG
 CREATE TABLE IF NOT EXISTS documents_chunks (
   chunk_id UUID PRIMARY KEY,

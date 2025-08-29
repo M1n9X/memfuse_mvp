@@ -17,6 +17,8 @@ class ChatLLM:
         self.model = settings.openai_model
         self.system_prompt_text = settings.system_prompt
         self.assistant_role_target = getattr(settings, "openai_assistant_role", "assistant")
+        # Expose a thin completion API for extractor usage
+        self._raw_client = self.client
 
     def chat(self, system_prompt: str, messages: List[dict]) -> str:
         # messages: list of {role, content}
@@ -45,3 +47,15 @@ class ChatLLM:
             messages=normalized,
         )
         return completion.choices[0].message.content or ""
+
+    def completion_json(self, system_prompt: str, user_prompt: str) -> str:
+        messages = [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ]
+        completion = self._raw_client.chat.completions.create(
+            model=self.model,
+            messages=messages,
+            response_format={"type": "json_object"},
+        )
+        return completion.choices[0].message.content or "{}"

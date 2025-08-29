@@ -13,6 +13,7 @@ from .tracing import ContextTrace
 from .indexer import SessionIndexer
 from .retrieval import BasicRetrievalStrategy
 from .utils import compute_content_hash
+from .structured import MemoryExtractor
 
 
 @dataclass
@@ -31,6 +32,7 @@ class RAGService:
     context: ContextController
     indexer: SessionIndexer
     retrieval: BasicRetrievalStrategy | None = None
+    extractor: MemoryExtractor | None = None
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RAGService":
@@ -44,6 +46,11 @@ class RAGService:
         )
         # Initialize default retrieval strategy (pluggable)
         service.retrieval = BasicRetrievalStrategy(service.db, service.embedder, service.settings)
+        # Initialize extractor for Phase 2
+        try:
+            service.extractor = MemoryExtractor(service.settings, service.db, service.llm, JinaEmbeddingClient(settings))
+        except Exception:
+            service.extractor = None
         return service
 
     def ingest_document(self, document_source: str, content: str, chunk_size: int = 800) -> int:
@@ -76,7 +83,10 @@ class RAGService:
     def chat(self, session_id: str, user_query: str, trace: ContextTrace | None = None) -> str:
         # Step 1: history truncation (load recent history; exact token truncation occurs in ContextController)
         # For efficiency, fetch only a bounded number of recent rounds from DB; fine truncation happens in ContextController
-        history = self.db.fetch_conversation_history(session_id=session_id, limit_rounds=self.settings.history_fetch_rounds)
+        try:
+            history = self.db.fetch_conversation_history(session_id=session_id, limit_rounds=self.settings.history_fetch_rounds)
+        except Exception:
+            history = []
 
         # Step 2: retrieval (ensure session index exists/updated)
         try:
@@ -96,8 +106,32 @@ class RAGService:
 
         # Step 5: store memory
         round_id = (history[-1][0] + 1) if history else 1
-        self.db.insert_conversation_message(session_id, round_id, "user", user_query)
-        self.db.insert_conversation_message(session_id, round_id, "ai", answer)
+        try:
+            self.db.insert_conversation_message(session_id, round_id, "user", user_query)
+            self.db.insert_conversation_message(session_id, round_id, "ai", answer)
+        except Exception:
+            pass
+
+        # Phase 2: trigger extractor with token-aware batching policy
+        if getattr(self.settings, "extractor_enabled", False) and self.extractor is not None and getattr(self.settings, "structured_enabled", False):
+            try:
+                # Fetch unextracted rounds and decide whether to extract now
+                pending = self.db.fetch_unextracted_rounds(session_id)
+                # If DB unavailable, fallback to just current round best-effort
+                if not pending:
+                    self.extractor.extract_and_store(session_id, round_id, [
+                        (round_id, "user", user_query),
+                        (round_id, "ai", answer),
+                    ])
+                else:
+                    # Ensure current round included (in case of race)
+                    if not any(rid == round_id for rid, _u, _a in pending):
+                        pending.append((round_id, user_query, answer))
+                    self.extractor.extract_if_needed_batch(
+                        session_id, pending, self.settings.extractor_trigger_tokens
+                    )
+            except Exception:
+                pass
         return answer
 
     def _chunk_text(self, text: str, chunk_size: int) -> List[str]:

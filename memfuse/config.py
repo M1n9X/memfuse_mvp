@@ -35,6 +35,13 @@ class Settings:
 
     system_prompt: str
 
+    # Phase 2 features
+    structured_enabled: bool
+    structured_top_k: int
+    extractor_enabled: bool
+    extractor_trigger_tokens: int
+    extractor_dedup_top_k: int
+
     @staticmethod
     def from_env() -> "Settings":
         load_env()
@@ -73,4 +80,9 @@ class Settings:
                     "4) Do not restate meta labels (like [Retrieved Chunks]); present a natural answer.\n"
                 ),
             ),
+            structured_enabled=(os.getenv("STRUCTURED_ENABLED", "false").lower() in {"1","true","yes","y"}),
+            structured_top_k=int(os.getenv("STRUCTURED_TOP_K", "5")),
+            extractor_enabled=(os.getenv("EXTRACTOR_ENABLED", "false").lower() in {"1","true","yes","y"}),
+            extractor_trigger_tokens=int(os.getenv("EXTRACTOR_TRIGGER_TOKENS", "2000")),
+            extractor_dedup_top_k=int(os.getenv("EXTRACTOR_DEDUP_TOP_K", "10")),
         )

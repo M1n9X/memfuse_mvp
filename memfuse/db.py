@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import contextlib
 from dataclasses import dataclass
-from typing import Iterator, Optional
+from typing import Iterator, Optional, List, Tuple
 
 import psycopg
 from pgvector.psycopg import register_vector
@@ -152,3 +152,139 @@ class Database:
             cur.execute(sql, (f"session:{session_id}", top_k))
             rows = cur.fetchall()
             return [(str(r[0]), str(r[1]) if r[1] is not None else "", float(r[2])) for r in rows]
+
+    # ----- Extraction coordination helpers (Phase 2) -----
+    def fetch_unextracted_rounds(self, session_id: str) -> list[tuple[int, str, str]]:
+        """Return list of (round_id, user_content, ai_content) for rounds where AI row is not extracted yet."""
+        sql = (
+            "SELECT c.round_id, c.speaker, c.content FROM conversations c "
+            "WHERE c.session_id = %s AND c.round_id IN ("
+            "  SELECT round_id FROM conversations WHERE session_id = %s AND speaker='ai' AND is_extracted = FALSE"
+            ") ORDER BY c.round_id ASC, c.timestamp ASC"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, (session_id, session_id))
+            rows = cur.fetchall()
+        # Group by round_id
+        by_round: dict[int, dict[str, str]] = {}
+        for rid, spk, content in rows:
+            rd = by_round.setdefault(int(rid), {"user": "", "ai": ""})
+            rd[str(spk)] = str(content)
+        result: list[tuple[int, str, str]] = []
+        for rid in sorted(by_round.keys()):
+            rd = by_round[rid]
+            result.append((rid, rd.get("user", ""), rd.get("ai", "")))
+        return result
+
+    def mark_rounds_extracted(self, session_id: str, round_ids: list[int]) -> int:
+        if not round_ids:
+            return 0
+        # Use ANY array to avoid IN expansion complexities
+        sql = (
+            "UPDATE conversations SET is_extracted = TRUE WHERE session_id = %s "
+            "AND round_id = ANY(%s)"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, (session_id, round_ids))
+            return cur.rowcount or 0
+
+    # ----- Phase 2: Structured memory operations -----
+    def insert_structured_records(
+        self,
+        records: List[Tuple[str, str, int, str, str, dict, dict, List[float] | None]],
+    ) -> int:
+        """Bulk insert structured memory records.
+
+        Each record tuple is (fact_id, session_id, source_round_id, type, content, relations, metadata)
+        Returns number of rows inserted (ignores conflicts by primary key if any).
+        """
+        if not records:
+            return 0
+        sql = (
+            "INSERT INTO structured_memory (fact_id, session_id, source_round_id, type, content, relations, metadata, embedding) "
+            "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb, %s) "
+            "ON CONFLICT (fact_id) DO NOTHING"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            inserted = 0
+            for rec in records:
+                # convert dicts to JSON strings for psycopg
+                r0, r1, r2, r3, r4, r5, r6, r7 = rec
+                rel_json = psycopg.types.json.Json(r5)
+                meta_json = psycopg.types.json.Json(r6)
+                try:
+                    cur.execute(sql, (r0, r1, r2, r3, r4, rel_json, meta_json, r7))
+                except Exception as e:
+                    # Fallback if 'embedding' column doesn't exist in current DB
+                    if "embedding" in str(e) and "column" in str(e).lower():
+                        cur.execute(
+                            "INSERT INTO structured_memory (fact_id, session_id, source_round_id, type, content, relations, metadata) "
+                            "VALUES (%s, %s, %s, %s, %s, %s::jsonb, %s::jsonb) ON CONFLICT (fact_id) DO NOTHING",
+                            (r0, r1, r2, r3, r4, rel_json, meta_json),
+                        )
+                    else:
+                        raise
+                inserted += cur.rowcount if cur.rowcount is not None else 1
+            return inserted
+
+    def query_structured_by_keywords(
+        self, session_id: str, keywords: List[str], top_k: int
+    ) -> List[Tuple[str, str, float]]:
+        """Simple keyword search over `structured_memory.content` for the session.
+
+        Returns list of (content, source, pseudo_score). Source will be like "structured:{type}#round".
+        Pseudo score is number of keyword matches.
+        """
+        if not keywords:
+            return []
+        # Build ILIKE conditions
+        conditions = " OR ".join(["content ILIKE %s" for _ in keywords])
+        params: List[object] = [session_id] + [f"%{kw}%" for kw in keywords]
+        sql = (
+            "SELECT content, type, source_round_id "
+            f"FROM structured_memory WHERE session_id = %s AND ({conditions})"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+            # rank by number of matched keywords
+            results: List[Tuple[str, str, float]] = []
+            for content, typ, rid in rows:
+                text = str(content)
+                score = sum(1 for kw in keywords if kw.lower() in text.lower())
+                source = f"structured:{str(typ)}#round={int(rid)}"
+                results.append((text, source, float(score)))
+            # sort desc by score and truncate
+            results.sort(key=lambda r: r[2], reverse=True)
+            return results[:top_k]
+
+    def fetch_structured_recent_for_session(self, session_id: str, top_k: int) -> List[Tuple[str, str, float]]:
+        """Fetch recent structured items for session to provide context (ordered by created_at DESC)."""
+        sql = (
+            "SELECT content, type, source_round_id FROM structured_memory "
+            "WHERE session_id = %s ORDER BY created_at DESC LIMIT %s"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, (session_id, top_k))
+            rows = cur.fetchall()
+            return [(str(r[0]), f"structured:{str(r[1])}#round={int(r[2])}", 0.0) for r in rows]
+
+    def query_structured_similar(
+        self, session_id: str, query_embedding: List[float], top_k: int
+    ) -> List[Tuple[str, str, float]]:
+        """Vector similarity search over structured facts for dedup/contradiction detection."""
+        sql = (
+            "WITH q AS (SELECT %s::vector AS v) "
+            "SELECT content, type, 1 - (embedding <=> q.v) AS cosine_similarity "
+            "FROM structured_memory, q WHERE session_id = %s AND embedding IS NOT NULL "
+            "ORDER BY embedding <=> q.v ASC LIMIT %s"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            vec = Vector(query_embedding)
+            try:
+                cur.execute("SET enable_indexscan = off; SET enable_bitmapscan = off;")
+            except Exception:
+                pass
+            cur.execute(sql, (vec, session_id, top_k))
+            rows = cur.fetchall()
+            return [(str(r[0]), f"structured:{str(r[1])}", float(r[2])) for r in rows]

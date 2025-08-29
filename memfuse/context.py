@@ -76,12 +76,23 @@ class ContextController:
         history_messages = truncated_history
 
         # Inject retrieved chunks as a system-style context block with explicit section headers
-        chunks_text = "\n\n".join(
-            [f"- Source: {c.source} (score={c.score:.3f})\n{c.content}" for c in retrieved_chunks]
+        # Split into facts vs chunks and present in separate sections
+        structured = [c for c in retrieved_chunks if str(c.source).startswith("structured:")]
+        unstructured = [c for c in retrieved_chunks if not str(c.source).startswith("structured:")]
+        facts_text = "\n\n".join(
+            [f"- Fact: {c.content}\n  Source: {c.source} (score={c.score:.3f})" for c in structured]
         )
+        chunks_text = "\n\n".join(
+            [f"- Source: {c.source} (score={c.score:.3f})\n{c.content}" for c in unstructured]
+        )
+        content_blocks = []
+        if facts_text:
+            content_blocks.append("[Retrieved Facts]\n" + facts_text)
+        if chunks_text:
+            content_blocks.append("[Retrieved Chunks]\n" + chunks_text)
         retrieved_block = {
             "role": "system",
-            "content": ("[Retrieved Chunks]\n" + chunks_text) if chunks_text else "",
+            "content": "\n\n".join(content_blocks),
         }
         if trace is not None:
             trace.retrieved_top_k = len(retrieved_chunks)
