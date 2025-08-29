@@ -30,6 +30,8 @@ class Settings:
     user_input_max_tokens: int
     total_context_max_tokens: int
     history_max_tokens: int
+    history_fetch_rounds: int
+    retrieval_prefer_session: bool
 
     system_prompt: str
 
@@ -58,6 +60,8 @@ class Settings:
             user_input_max_tokens=int(os.getenv("USER_INPUT_MAX_TOKENS", "2048")),
             total_context_max_tokens=int(os.getenv("TOTAL_CONTEXT_MAX_TOKENS", "4096")),
             history_max_tokens=int(os.getenv("HISTORY_MAX_TOKENS", "1024")),
+            history_fetch_rounds=int(os.getenv("HISTORY_FETCH_ROUNDS", "200")),
+            retrieval_prefer_session=(os.getenv("RETRIEVAL_PREFER_SESSION", "true").lower() in {"1","true","yes","y"}),
             system_prompt=os.getenv(
                 "SYSTEM_PROMPT",
                 (

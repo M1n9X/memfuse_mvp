@@ -11,20 +11,30 @@ from .llm import ChatLLM
 from .context import ContextController, RetrievedChunk
 from .tracing import ContextTrace
 from .indexer import SessionIndexer
+from .retrieval import BasicRetrievalStrategy
+from .utils import compute_content_hash
 
 
 @dataclass
 class RAGService:
+    """High-level orchestrator for Phase-1 Pgvector-based RAG pipeline.
+
+    Responsibilities:
+    - Ingestion: chunk input text, embed, and persist to `documents_chunks`.
+    - Chat: load history, ensure session index, retrieve similar chunks, build context,
+      call LLM, and persist the new turn into `conversations`.
+    """
     settings: Settings
     db: Database
     embedder: JinaEmbeddingClient
     llm: ChatLLM
     context: ContextController
     indexer: SessionIndexer
+    retrieval: BasicRetrievalStrategy | None = None
 
     @classmethod
     def from_settings(cls, settings: Settings) -> "RAGService":
-        return cls(
+        service = cls(
             settings=settings,
             db=Database.from_settings(settings),
             embedder=JinaEmbeddingClient(settings),
@@ -32,50 +42,51 @@ class RAGService:
             context=ContextController(settings),
             indexer=SessionIndexer(Database.from_settings(settings), JinaEmbeddingClient(settings)),
         )
+        # Initialize default retrieval strategy (pluggable)
+        service.retrieval = BasicRetrievalStrategy(service.db, service.embedder, service.settings)
+        return service
 
     def ingest_document(self, document_source: str, content: str, chunk_size: int = 800) -> int:
         chunks = self._chunk_text(content, chunk_size)
-        embeddings = self.embedder.embed(chunks)
-        for text, emb in zip(chunks, embeddings):
+        # Compute hashes first and drop duplicates within this batch
+        seen_hashes: set[str] = set()
+        deduped: list[tuple[str, str]] = []  # (text, hash)
+        for text in chunks:
+            h = compute_content_hash(text)
+            if h in seen_hashes:
+                continue
+            seen_hashes.add(h)
+            deduped.append((text, h))
+        if not deduped:
+            return 0
+        embeddings = self.embedder.embed([t for (t, _h) in deduped])
+        inserted = 0
+        for (text, h), emb in zip(deduped, embeddings):
+            # Rely on DB-side ON CONFLICT to avoid duplicates across runs
             self.db.insert_document_chunk(
                 chunk_id=str(uuid.uuid4()),
                 document_source=document_source,
                 content=text,
                 embedding=emb,
+                content_hash=h,
             )
-        return len(chunks)
+            inserted += 1
+        return inserted
 
     def chat(self, session_id: str, user_query: str, trace: ContextTrace | None = None) -> str:
         # Step 1: history truncation (load recent history; exact token truncation occurs in ContextController)
-        history = self.db.fetch_conversation_history(session_id=session_id)
+        # For efficiency, fetch only a bounded number of recent rounds from DB; fine truncation happens in ContextController
+        history = self.db.fetch_conversation_history(session_id=session_id, limit_rounds=self.settings.history_fetch_rounds)
 
         # Step 2: retrieval (ensure session index exists/updated)
         try:
             self.indexer.ensure_built(session_id, history)
         except Exception:
             pass
-        # Now perform retrieval
-        rows: list[tuple[str, str, float]] = []
-        try:
-            query_embedding = self.embedder.embed([user_query])[0]
-            # Prefer session-scoped chunks if available; else global
-            if self.db.count_session_chunks(session_id) > 0:
-                rows = self.db.search_similar_chunks_for_session(query_embedding, self.settings.rag_top_k, session_id)
-            else:
-                rows = self.db.search_similar_chunks(query_embedding, self.settings.rag_top_k)
-        except Exception:
-            rows = []
-        if not rows:
-            # Fallback: basic strategy - return top K chunks without similarity
-            if self.db.count_session_chunks(session_id) > 0:
-                rows = self.db.fetch_top_k_chunks_for_session(min(3, self.settings.rag_top_k), session_id)
-            else:
-                rows = self.db.fetch_top_k_chunks(min(3, self.settings.rag_top_k))
-        if not rows and history:
-            # Fallback 2: derive chunks from recent history if no documents available
-            recent = history[-3:]
-            rows = [(h[2], f"history#{h[0]}:{h[1]}", 0.0) for h in recent]
-        retrieved = [RetrievedChunk(content=r[0], source=r[1], score=r[2]) for r in rows]
+        # Now perform retrieval via strategy
+        if self.retrieval is None:
+            self.retrieval = BasicRetrievalStrategy(self.db, self.embedder, self.settings)
+        retrieved = self.retrieval.retrieve(session_id, user_query, history)
 
         # Step 3: context construction
         messages = self.context.build_final_context(user_query, history, retrieved, trace=trace)

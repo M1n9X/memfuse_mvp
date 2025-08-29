@@ -42,10 +42,29 @@ Usage
   #   OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_COMPATIBLE_MODEL
   ```
 
+Notes on performance & robustness
+- Ingestion and session indexing are idempotent by content hash. Re-ingesting or re-chatting will not duplicate vector rows.
+- DB schema creates a unique index on `(document_source, content_hash)` under `documents_chunks`.
+- You can control DB-side history fetch window via `HISTORY_FETCH_ROUNDS` (default 200). Fine-grained token truncation is still handled by the context controller using `HISTORY_MAX_TOKENS`.
+- Retrieval behavior can be tuned with `RETRIEVAL_PREFER_SESSION` (default true). If true and session index exists, retrieval prefers session-scoped chunks; otherwise uses global corpus.
+
+Schema changes & migration
+- If you created the DB volume before this version, run:
+  ```bash
+  scripts/start.sh --reset
+  ```
+  to recreate schema and apply the unique index.
+
 Debugging (no LLM call)
 ```bash
 # Inspect retrieval + context sizes without calling the LLM
 poetry run memfuse debug session1 "your question here"
+```
+
+Health check
+```bash
+# Quick checks (DB connectivity, optional live API pings)
+poetry run memfuse health --strict --check-embeddings --check-llm
 ```
 
 End-to-end checklist

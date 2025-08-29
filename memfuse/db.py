@@ -68,14 +68,22 @@ class Database:
             )
 
     def insert_document_chunk(
-        self, chunk_id: str, document_source: str, content: str, embedding: list[float]
+        self, chunk_id: str, document_source: str, content: str, embedding: list[float], content_hash: str | None = None
     ) -> None:
         with self.connect() as conn, conn.cursor() as cur:
-            cur.execute(
-                "INSERT INTO documents_chunks (chunk_id, document_source, content, embedding) "
-                "VALUES (%s, %s, %s, %s)",
-                (chunk_id, document_source, content, embedding),
-            )
+            if content_hash is None:
+                cur.execute(
+                    "INSERT INTO documents_chunks (chunk_id, document_source, content, embedding) "
+                    "VALUES (%s, %s, %s, %s)",
+                    (chunk_id, document_source, content, embedding),
+                )
+            else:
+                cur.execute(
+                    "INSERT INTO documents_chunks (chunk_id, document_source, content, embedding, content_hash) "
+                    "VALUES (%s, %s, %s, %s, %s) "
+                    "ON CONFLICT (document_source, content_hash) DO NOTHING",
+                    (chunk_id, document_source, content, embedding, content_hash),
+                )
 
     def search_similar_chunks(
         self, query_embedding: list[float], top_k: int

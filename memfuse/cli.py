@@ -28,6 +28,12 @@ def main() -> None:
     debug.add_argument("session", help="Session id")
     debug.add_argument("query", help="User query")
 
+    health = sub.add_parser("health", help="Check environment and dependencies")
+    health.add_argument("--strict", action="store_true", help="Exit non-zero if any check fails")
+    health.add_argument("--check-embeddings", action="store_true", help="Perform a live embeddings API check")
+    health.add_argument("--check-llm", action="store_true", help="Perform a live LLM chat API check")
+    health.add_argument("--db-timeout", type=int, default=2, help="DB connect timeout seconds (default: 2)")
+
     args = parser.parse_args()
 
     settings = Settings.from_env()
@@ -146,6 +152,66 @@ def main() -> None:
             print(f"  {i}. source={c.source} score={c.score:.3f} preview={preview}")
         total_tokens = sum(count_tokens(m.get('content','')) + 4 for m in messages)
         print(f"context_messages={len(messages)} total_tokens~={total_tokens}")
+    elif args.cmd == "health":
+        console = Console()
+        ok = True
+        console.rule("Health Check")
+        # Settings summary
+        console.print(Panel(
+            f"DB={settings.database_url}\nEMBED_MODEL={settings.embedding_model}\nOPENAI_MODEL={settings.openai_model}",
+            title="Settings", border_style="blue"
+        ))
+
+        # DB check with timeout
+        try:
+            import psycopg
+            dsn = settings.database_url
+            conn = psycopg.connect(dsn, autocommit=True, connect_timeout=args.db_timeout)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("SELECT 1")
+                    (one,) = cur.fetchone()
+                    cur.execute("SELECT count(*) FROM information_schema.tables WHERE table_schema='public'")
+                    (tcount,) = cur.fetchone()
+                console.print("[green]DB:[/green] OK (tables=" + str(tcount) + ")")
+            finally:
+                conn.close()
+        except Exception as e:
+            ok = False
+            console.print(f"[red]DB:[/red] FAIL - {e}")
+
+        # Embeddings check (optional)
+        if args.check_embeddings:
+            try:
+                vecs = service.embedder.embed(["ping"]) or []
+                dim = len(vecs[0]) if vecs else 0
+                if dim > 0:
+                    console.print(f"[green]Embeddings:[/green] OK (dim={dim})")
+                else:
+                    ok = False
+                    console.print("[red]Embeddings:[/red] FAIL - empty response")
+            except Exception as e:
+                ok = False
+                console.print(f"[red]Embeddings:[/red] FAIL - {e}")
+
+        # LLM check (optional)
+        if args.check_llm:
+            try:
+                out = service.llm.chat(settings.system_prompt, [{"role":"user","content":"ping"}])
+                if out:
+                    console.print("[green]LLM:[/green] OK")
+                else:
+                    ok = False
+                    console.print("[red]LLM:[/red] FAIL - empty response")
+            except Exception as e:
+                ok = False
+                console.print(f"[red]LLM:[/red] FAIL - {e}")
+
+        console.rule()
+        if args.strict and not ok:
+            sys.exit(3)
+        else:
+            console.print("[bold]Health check completed[/bold]")
 
 
 if __name__ == "__main__":
