@@ -96,3 +96,51 @@ class Database:
             cur.execute(sql, (vec, top_k))
             rows = cur.fetchall()
             return [(str(r[0]), str(r[1]) if r[1] is not None else "", float(r[2])) for r in rows]
+
+    def fetch_top_k_chunks(self, top_k: int) -> list[tuple[str, str, float]]:
+        """Return top_k chunks without similarity (basic strategy)."""
+        sql = (
+            "SELECT content, document_source, 0.0 AS cosine_similarity "
+            "FROM documents_chunks ORDER BY chunk_id ASC LIMIT %s"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, (top_k,))
+            rows = cur.fetchall()
+            return [(str(r[0]), str(r[1]) if r[1] is not None else "", float(r[2])) for r in rows]
+
+    # Session-scoped operations for retrieving chunks from conversation history index
+    def count_session_chunks(self, session_id: str) -> int:
+        sql = "SELECT COUNT(*) FROM documents_chunks WHERE document_source = %s"
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, (f"session:{session_id}",))
+            (count,) = cur.fetchone()
+            return int(count)
+
+    def search_similar_chunks_for_session(
+        self, query_embedding: list[float], top_k: int, session_id: str
+    ) -> list[tuple[str, str, float]]:
+        sql = (
+            "WITH q AS (SELECT %s::vector AS v) "
+            "SELECT content, document_source, 1 - (embedding <=> q.v) AS cosine_similarity "
+            "FROM documents_chunks, q WHERE document_source = %s "
+            "ORDER BY embedding <=> q.v ASC LIMIT %s"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            vec = Vector(query_embedding)
+            try:
+                cur.execute("SET enable_indexscan = off; SET enable_bitmapscan = off;")
+            except Exception:
+                pass
+            cur.execute(sql, (vec, f"session:{session_id}", top_k))
+            rows = cur.fetchall()
+            return [(str(r[0]), str(r[1]) if r[1] is not None else "", float(r[2])) for r in rows]
+
+    def fetch_top_k_chunks_for_session(self, top_k: int, session_id: str) -> list[tuple[str, str, float]]:
+        sql = (
+            "SELECT content, document_source, 0.0 AS cosine_similarity FROM documents_chunks "
+            "WHERE document_source = %s ORDER BY chunk_id ASC LIMIT %s"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, (f"session:{session_id}", top_k))
+            rows = cur.fetchall()
+            return [(str(r[0]), str(r[1]) if r[1] is not None else "", float(r[2])) for r in rows]

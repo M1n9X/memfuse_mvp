@@ -6,7 +6,7 @@ import sys
 from .config import Settings
 from .rag import RAGService
 from rich.console import Console
-from rich.markdown import Markdown
+from rich.panel import Panel
 from .context import RetrievedChunk
 from .tokenizer import count_tokens
 
@@ -73,21 +73,22 @@ def main() -> None:
                     # System prompt (from settings)
                     from .config import Settings as _S
                     sp = _S.from_env().system_prompt
-                    console.print("[bold]System Prompt[/bold]\n" + sp)
+                    console.print(Panel(sp, title="[bold blue]System Prompt[/bold blue]", border_style="blue"))
                     # User input
-                    console.print("\n[bold]User Query[/bold]\n" + user_q)
+                    console.print(Panel(user_q, title="[bold cyan]User Query[/bold cyan]", border_style="cyan"))
                     # Retrieved
-                    if trace.retrieved_block_content:
-                        console.print("\n[bold]Retrieved Chunks[/bold]\n" + trace.retrieved_block_content)
-                    # History kept
+                    # Retrieved Chunks panel (always show, even if empty)
+                    retrieved_content = trace.retrieved_block_content or "<none>"
+                    rc_title = f"[bold green]Retrieved Chunks[/bold green] (top {trace.retrieved_count})"
+                    console.print(Panel(retrieved_content, title=rc_title, border_style="green"))
+                    # History kept (show exactly what's kept, not meta)
                     if trace.history_rounds_after:
-                        console.print(f"\n[bold]History (kept {trace.history_rounds_after} rounds)[/bold]")
-                        # Print last few kept messages from final_messages
-                        kept = [m for m in trace.final_messages if m.get('role') in {'user','ai'}]
-                        for m in kept[-6:]:
-                            who = 'You' if m['role']=='user' else 'Chatbot'
-                            preview = m.get('content','')
-                            console.print(f"[dim]{who}>[/dim] {preview}")
+                        kept_lines = []
+                        for role, content in trace.history_kept_messages[-6:]:
+                            who = 'You' if role=='user' else 'Chatbot'
+                            kept_lines.append(f"{who}> {content}")
+                        hist_title = f"[bold yellow]History[/bold yellow] (kept {trace.history_rounds_after} rounds)"
+                        console.print(Panel("\n".join(kept_lines) if kept_lines else "<none>", title=hist_title, border_style="yellow"))
                     if trace.user_truncated:
                         console.print(f"[yellow]User input truncated:[/yellow] {trace.user_tokens_before} -> {trace.user_tokens_after}")
                     if trace.history_truncated:
@@ -106,6 +107,13 @@ def main() -> None:
                         for src, score in trace.retrieved_preview:
                             console.print(f"  [dim]{src}[/dim] score={score:.3f}")
                     console.print(f"Final messages: {trace.final_messages_count}, token~={trace.final_tokens_estimate}")
+                    # Final Context panel
+                    fc_lines = ["(System prompt is prepended separately; shown above)"]
+                    for i, m in enumerate(trace.final_messages, 1):
+                        role = m.get('role','')
+                        content = m.get('content','')
+                        fc_lines.append(f"[{i}] ({role}) {content}")
+                    console.print(Panel("\n".join(fc_lines), title="[bold magenta]Final Context (raw, order to LLM)[/bold magenta]", border_style="magenta"))
                     console.rule()
                 # Fake streaming: chunk the answer for UX
                 console.print("[bold magenta]Chatbot>[/bold magenta] ", end="")

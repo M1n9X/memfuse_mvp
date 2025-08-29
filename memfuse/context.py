@@ -72,15 +72,16 @@ class ContextController:
                 for (rid, spk, cont) in conversation_history:
                     if (spk, cont) not in kept_set:
                         trace.dropped_messages.append((rid, spk, cont))
+            trace.history_kept_messages = [(m.get("role",""), m.get("content","")) for m in truncated_history]
         history_messages = truncated_history
 
-        # Inject retrieved chunks as a system-style context block
+        # Inject retrieved chunks as a system-style context block with explicit section headers
         chunks_text = "\n\n".join(
-            [f"[Source: {c.source} | Score: {c.score:.3f}]\n{c.content}" for c in retrieved_chunks]
+            [f"- Source: {c.source} (score={c.score:.3f})\n{c.content}" for c in retrieved_chunks]
         )
         retrieved_block = {
             "role": "system",
-            "content": f"Relevant knowledge:\n{chunks_text}" if chunks_text else "",
+            "content": ("[Retrieved Chunks]\n" + chunks_text) if chunks_text else "",
         }
         if trace is not None:
             trace.retrieved_top_k = len(retrieved_chunks)
@@ -88,51 +89,51 @@ class ContextController:
             trace.retrieved_preview = [(c.source, c.score) for c in retrieved_chunks[:5]]
             trace.retrieved_block_content = retrieved_block["content"]
 
-        # Per PRD: final_context = user_query + retrieved_chunks + conversation_history + system_prompt
-        # We'll structure messages accordingly before passing to LLM wrapper (which prepends system prompt).
-        candidate = [
-            {"role": "user", "content": user_query_text},
-            retrieved_block,
-        ] + history_messages
+        # Build blocks: system(retrieved), optional system(summary), history, user
+        prefix_blocks: list[dict] = []
+        if retrieved_block.get("content"):
+            prefix_blocks.append(retrieved_block)
 
         # If history was truncated, add a compressed summary of dropped content
+        summary_block: dict | None = None
         if trace is not None and trace.history_truncated and trace.dropped_messages:
             summary_text = self._summarize_dropped_messages(trace.dropped_messages)
             if summary_text:
                 summary_block = {"role": "system", "content": summary_text}
-                # Insert after retrieved block
-                candidate.insert(2, summary_block)
                 trace.summary_added = True
                 trace.summary_text = summary_text
                 trace.summary_tokens = count_tokens(summary_text)
+                prefix_blocks.append(summary_block)
+
+        candidate = prefix_blocks + history_messages + [
+            {"role": "user", "content": user_query_text}
+        ]
 
         # Trim to total context limit
         while self._messages_token_count(candidate) > self.settings.total_context_max_tokens:
             # Drop oldest history first
             if history_messages:
                 history_messages.pop(0)
-                candidate = [
-                    {"role": "user", "content": user_query_text},
-                    retrieved_block,
-                ] + history_messages
-                # If a summary was added earlier, ensure it remains right after retrieved block
-                if trace is not None and trace.summary_added:
-                    candidate = [candidate[0], candidate[1], {"role": "system", "content": trace.summary_text}] + candidate[2:]
+                candidate = prefix_blocks + history_messages + [
+                    {"role": "user", "content": user_query_text}
+                ]
             else:
                 # As a last resort, truncate retrieved_block and user content further
-                retrieved_block["content"] = truncate_by_tokens(
-                    retrieved_block.get("content", ""),
-                    max(0, self.settings.total_context_max_tokens // 2),
-                )
+                # Keep a small retrieved header + first chunk preview instead of dropping entirely
+                rb = retrieved_block.get("content", "")
+                header = "[Retrieved Chunks]\n"
+                body = rb[len(header):] if rb.startswith(header) else rb
+                safe_rb = header + truncate_by_tokens(body, max(128, self.settings.total_context_max_tokens // 8))
+                retrieved_block["content"] = safe_rb
                 user_query_text = truncate_by_tokens(
-                    user_query_text, max(0, self.settings.total_context_max_tokens // 4)
+                    user_query_text, max(64, self.settings.total_context_max_tokens // 6)
                 )
-                candidate = [
-                    {"role": "user", "content": user_query_text},
-                    retrieved_block,
+                # Update prefix_blocks with possibly truncated retrieved content
+                if prefix_blocks:
+                    prefix_blocks[0] = retrieved_block
+                candidate = prefix_blocks + [
+                    {"role": "user", "content": user_query_text}
                 ]
-                if trace is not None and trace.summary_added:
-                    candidate.append({"role": "system", "content": trace.summary_text})
                 break
 
         if trace is not None:

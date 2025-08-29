@@ -25,6 +25,7 @@ class Settings:
     openai_api_key: str
     openai_base_url: str
     openai_model: str
+    openai_assistant_role: str
 
     user_input_max_tokens: int
     total_context_max_tokens: int
@@ -52,12 +53,20 @@ class Settings:
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             openai_base_url=os.getenv("OPENAI_BASE_URL", ""),
             openai_model=os.getenv("OPENAI_COMPATIBLE_MODEL", ""),
+            openai_assistant_role=os.getenv("OPENAI_ASSISTANT_ROLE", "assistant"),
             # Smaller defaults for easier demo; override in .env if needed
             user_input_max_tokens=int(os.getenv("USER_INPUT_MAX_TOKENS", "2048")),
             total_context_max_tokens=int(os.getenv("TOTAL_CONTEXT_MAX_TOKENS", "4096")),
             history_max_tokens=int(os.getenv("HISTORY_MAX_TOKENS", "1024")),
             system_prompt=os.getenv(
                 "SYSTEM_PROMPT",
-                "You are MemFuse, a helpful assistant. Use provided context.",
+                (
+                    "You are MemFuse, a helpful assistant. Use provided context.\n"
+                    "Follow these rules when forming your answer:\n"
+                    "1) Prioritize the current user query at the end of the context.\n"
+                    "2) Use [Retrieved Chunks] as external knowledge; cite relevant sources when possible.\n"
+                    "3) [History summary (compressed)] captures truncated past turns; use it only for continuity.\n"
+                    "4) Do not restate meta labels (like [Retrieved Chunks]); present a natural answer.\n"
+                ),
             ),
         )

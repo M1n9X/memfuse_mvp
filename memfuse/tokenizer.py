@@ -21,14 +21,25 @@ def truncate_by_tokens(text: str, max_tokens: int) -> str:
 
 
 def truncate_messages_by_tokens(messages: list[dict], max_tokens: int) -> list[dict]:
-    # Roughly truncate by message order while respecting max_tokens
+    # Roughly truncate by message order while respecting max_tokens.
+    # Always try to keep at least the last message (truncated if needed).
     enc = tiktoken.get_encoding("cl100k_base")
+    if max_tokens <= 0 or not messages:
+        return []
     total = 0
     kept: list[dict] = []
     # Keep only the tail (most recent) messages
     for msg in reversed(messages):
-        tokens = len(enc.encode(msg.get("content", ""))) + 4
+        content = msg.get("content", "")
+        tokens = len(enc.encode(content)) + 4
         if total + tokens > max_tokens:
+            # If we haven't kept anything yet, include a truncated version of this message
+            if not kept:
+                budget = max_tokens - 4
+                truncated = truncate_by_tokens(content, max(0, budget))
+                if truncated:
+                    kept.append({**msg, "content": truncated})
+                    total = max_tokens
             break
         kept.append(msg)
         total += tokens

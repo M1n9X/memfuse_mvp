@@ -20,6 +20,7 @@ class ContextTrace:
     history_rounds_before: int = 0
     history_rounds_after: int = 0
     dropped_messages: List[Tuple[int, str, str]] = field(default_factory=list)  # (round_id, speaker, content)
+    history_kept_messages: List[Tuple[str, str]] = field(default_factory=list)  # (role, content)
 
     # Summary
     summary_added: bool = False
