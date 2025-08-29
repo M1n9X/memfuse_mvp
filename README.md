@@ -20,6 +20,13 @@ Setup
    docker compose up -d
    ```
 
+One-click start
+```bash
+# Start or reset-and-start DB + schema
+scripts/start.sh         # normal start
+scripts/start.sh --reset # drop volumes then start
+```
+
 Usage
 - Ingest a text file:
   ```bash
@@ -27,7 +34,10 @@ Usage
   ```
 - Chat:
   ```bash
+  # Single-turn
   poetry run memfuse chat session1 "What did we discuss at the start?"
+  # Interactive terminal chatbot
+  poetry run memfuse chat session1 -
   # If using an OpenAI-compatible endpoint, ensure env values:
   #   OPENAI_BASE_URL, OPENAI_API_KEY, OPENAI_COMPATIBLE_MODEL
   ```
@@ -54,8 +64,8 @@ End-to-end checklist
 
 Notes
 - Context limits per PRD:
-  - `USER_INPUT_MAX_TOKENS=32000`
-  - `TOTAL_CONTEXT_MAX_TOKENS=64000`
+  - `USER_INPUT_MAX_TOKENS` default lowered for demo
+  - `TOTAL_CONTEXT_MAX_TOKENS` default lowered for demo
   - `HISTORY_MAX_TOKENS` controls how much history is included
 - Retrieval ordering uses cosine similarity on pgvector.
 - If retrieval ever returns 0 unexpectedly with very small datasets, the code falls back to sequential scan (disables index/bitmap scan) to avoid ivfflat edge-cases during MVP.

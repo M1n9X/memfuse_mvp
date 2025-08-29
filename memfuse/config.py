@@ -52,9 +52,10 @@ class Settings:
             openai_api_key=os.getenv("OPENAI_API_KEY", ""),
             openai_base_url=os.getenv("OPENAI_BASE_URL", ""),
             openai_model=os.getenv("OPENAI_COMPATIBLE_MODEL", ""),
-            user_input_max_tokens=int(os.getenv("USER_INPUT_MAX_TOKENS", "32000")),
-            total_context_max_tokens=int(os.getenv("TOTAL_CONTEXT_MAX_TOKENS", "64000")),
-            history_max_tokens=int(os.getenv("HISTORY_MAX_TOKENS", "16000")),
+            # Smaller defaults for easier demo; override in .env if needed
+            user_input_max_tokens=int(os.getenv("USER_INPUT_MAX_TOKENS", "2048")),
+            total_context_max_tokens=int(os.getenv("TOTAL_CONTEXT_MAX_TOKENS", "4096")),
+            history_max_tokens=int(os.getenv("HISTORY_MAX_TOKENS", "1024")),
             system_prompt=os.getenv(
                 "SYSTEM_PROMPT",
                 "You are MemFuse, a helpful assistant. Use provided context.",

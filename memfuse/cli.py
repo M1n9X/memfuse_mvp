@@ -5,6 +5,8 @@ import sys
 
 from .config import Settings
 from .rag import RAGService
+from rich.console import Console
+from rich.markdown import Markdown
 from .context import RetrievedChunk
 from .tokenizer import count_tokens
 
@@ -40,12 +42,37 @@ def main() -> None:
         n = service.ingest_document(args.source, content)
         print(f"Ingested {n} chunks from {args.path}")
     elif args.cmd == "chat":
-        try:
-            answer = service.chat(args.session, args.query)
-        except Exception as e:
-            print(f"Chat failed: {e}", file=sys.stderr)
-            sys.exit(2)
-        print(answer)
+        console = Console()
+        # Interactive mode if query is '-'
+        if args.query == "-":
+            console.print("[bold green]MemFuse Chat[/bold green] - type /exit to quit", highlight=False)
+            while True:
+                try:
+                    user_q = console.input("[bold cyan]You>[/bold cyan] ")
+                except (KeyboardInterrupt, EOFError):
+                    console.print("\n[dim]Bye[/dim]")
+                    break
+                if user_q.strip() in {"/exit", ":q", "/quit"}:
+                    console.print("[dim]Bye[/dim]")
+                    break
+                # Call non-streaming backend for now; print as streaming chunks
+                try:
+                    answer = service.chat(args.session, user_q)
+                except Exception as e:
+                    console.print(f"[red]Chat failed:[/red] {e}")
+                    continue
+                # Fake streaming: chunk the answer for UX
+                for part in answer.split():
+                    console.print(part + " ", end="", style="yellow")
+                    console.file.flush()
+                console.print("\n")
+        else:
+            try:
+                answer = service.chat(args.session, args.query)
+            except Exception as e:
+                print(f"Chat failed: {e}", file=sys.stderr)
+                sys.exit(2)
+            print(answer)
     elif args.cmd == "debug":
         # Step 1: history
         history = service.db.fetch_conversation_history(session_id=args.session)
