@@ -1,0 +1,27 @@
+[tool.poetry]
+name = "memfuse-mvp"
+version = "0.1.0"
+description = "MemFuse MVP - Phase 1: Pgvector-based RAG system"
+authors = ["MemFuse Team <dev@example.com>"]
+readme = "README.md"
+packages = [{ include = "memfuse" }]
+
+[tool.poetry.dependencies]
+python = "^3.11"
+psycopg = {version = "^3.2.3", extras = ["binary"]}
+pgvector = "^0.3.6"
+requests = "^2.32.3"
+openai = "^1.51.2"
+python-dotenv = "^1.0.1"
+tiktoken = "^0.7.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.3.2"
+responses = "^0.25.3"
+
+[tool.poetry.scripts]
+memfuse = "memfuse.cli:main"
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
