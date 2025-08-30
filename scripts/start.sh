@@ -48,5 +48,6 @@ docker exec memfuse_db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc "CREA
 docker exec memfuse_db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -f /docker-entrypoint-initdb.d/010-schema.sql >/dev/null 2>&1 || true
 docker exec memfuse_db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -f /docker-entrypoint-initdb.d/020-structured-memory.sql >/dev/null 2>&1 || true
 docker exec memfuse_db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -f /docker-entrypoint-initdb.d/030-procedural-memory.sql >/dev/null 2>&1 || true
+docker exec memfuse_db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -f /docker-entrypoint-initdb.d/035-procedural-lessons.sql >/dev/null 2>&1 || true
 
 echo "[MemFuse] DB is ready: ${POSTGRES_USER}@localhost/${POSTGRES_DB}"

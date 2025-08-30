@@ -47,6 +47,10 @@ class Settings:
     procedural_top_k: int = 5
     procedural_reuse_threshold: float = 0.9
 
+    # Orchestrator controls
+    planner_max_attempts: int = 3
+    runs_base_dir: str = "runs"
+
     @staticmethod
     def from_env() -> "Settings":
         load_env()
@@ -94,4 +98,6 @@ class Settings:
             m3_enabled=(os.getenv("M3_ENABLED", "false").lower() in {"1","true","yes","y"}),
             procedural_top_k=int(os.getenv("PROCEDURAL_TOP_K", "5")),
             procedural_reuse_threshold=float(os.getenv("PROCEDURAL_REUSE_THRESHOLD", "0.9")),
+            planner_max_attempts=int(os.getenv("PLANNER_MAX_ATTEMPTS", "3")),
+            runs_base_dir=os.getenv("RUNS_BASE_DIR", "runs"),
         )

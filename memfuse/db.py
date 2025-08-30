@@ -338,3 +338,51 @@ class Database:
         with self.connect() as conn, conn.cursor() as cur:
             cur.execute("UPDATE procedural_memory SET usage_count = usage_count + %s WHERE workflow_id = %s", (by, workflow_id))
             return cur.rowcount or 0
+
+    # ----- Phase 4: Lessons (experience) operations -----
+    def insert_lesson(
+        self,
+        trigger_embedding: List[float],
+        goal_text: str,
+        agent: str,
+        status: str,
+        error: str | None,
+        fix_summary: str | None,
+        working_params: dict | None,
+    ) -> str:
+        sql = (
+            "INSERT INTO procedural_lessons (lesson_id, trigger_embedding, goal_text, agent, status, error, fix_summary, working_params) "
+            "VALUES (%s, %s, %s, %s, %s, %s, %s, %s::jsonb)"
+        )
+        lesson_id = str(uuid.uuid4())
+        from pgvector.utils import Vector as _V
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute(sql, (lesson_id, _V(trigger_embedding), goal_text, agent, status, error, fix_summary, psycopg.types.json.Json(working_params or {})))
+        return lesson_id
+
+    def query_lessons_similar(self, trigger_embedding: List[float], agent: str | None, top_k: int = 5) -> List[tuple[str, str, str, dict, float]]:
+        """Return (lesson_id, status, fix_summary, working_params, score)."""
+        where = "WHERE 1=1 " + ("AND agent = %s " if agent else "")
+        sql = (
+            f"WITH q AS (SELECT %s::vector AS v) "
+            f"SELECT lesson_id, status, fix_summary, working_params, 1 - (trigger_embedding <=> q.v) AS cosine_similarity "
+            f"FROM procedural_lessons, q {where}ORDER BY trigger_embedding <=> q.v ASC LIMIT %s"
+        )
+        params: list[object] = []
+        from pgvector.utils import Vector as _V
+        vec = _V(trigger_embedding)
+        params.append(vec)
+        if agent:
+            params.append(agent)
+        params.append(top_k)
+        with self.connect() as conn, conn.cursor() as cur:
+            try:
+                cur.execute("SET enable_indexscan = off; SET enable_bitmapscan = off;")
+            except Exception:
+                pass
+            cur.execute(sql, tuple(params))
+            rows = cur.fetchall()
+            out: List[tuple[str, str, str, dict, float]] = []
+            for lid, status, fix_summary, wparams, score in rows:
+                out.append((str(lid), str(status), str(fix_summary) if fix_summary is not None else "", wparams if isinstance(wparams, dict) else {}, float(score)))
+            return out
