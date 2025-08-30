@@ -288,3 +288,53 @@ class Database:
             cur.execute(sql, (vec, session_id, top_k))
             rows = cur.fetchall()
             return [(str(r[0]), f"structured:{str(r[1])}#round={int(r[2])}", float(r[3])) for r in rows]
+
+    # ----- Phase 4: Procedural memory operations -----
+    def upsert_procedural_workflow(
+        self,
+        workflow_id: str,
+        trigger_embedding: List[float],
+        successful_workflow: dict,
+        trigger_pattern: Optional[str] = None,
+    ) -> None:
+        sql = (
+            "INSERT INTO procedural_memory (workflow_id, trigger_embedding, trigger_pattern, successful_workflow, usage_count) "
+            "VALUES (%s, %s, %s, %s::jsonb, 1) "
+            "ON CONFLICT (workflow_id) DO UPDATE SET "
+            "trigger_embedding = EXCLUDED.trigger_embedding, "
+            "trigger_pattern = EXCLUDED.trigger_pattern, "
+            "successful_workflow = EXCLUDED.successful_workflow, "
+            "usage_count = procedural_memory.usage_count + 1"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            vec = Vector(trigger_embedding)
+            cur.execute(sql, (workflow_id, vec, trigger_pattern, psycopg.types.json.Json(successful_workflow)))
+
+    def query_procedural_similar(self, query_embedding: List[float], top_k: int) -> List[Tuple[str, dict, float]]:
+        """Return list of (workflow_id, successful_workflow_json, cosine_similarity)."""
+        sql = (
+            "WITH q AS (SELECT %s::vector AS v) "
+            "SELECT workflow_id, successful_workflow, 1 - (trigger_embedding <=> q.v) AS cosine_similarity "
+            "FROM procedural_memory, q ORDER BY trigger_embedding <=> q.v ASC LIMIT %s"
+        )
+        with self.connect() as conn, conn.cursor() as cur:
+            vec = Vector(query_embedding)
+            try:
+                cur.execute("SET enable_indexscan = off; SET enable_bitmapscan = off;")
+            except Exception:
+                pass
+            cur.execute(sql, (vec, top_k))
+            rows = cur.fetchall()
+            results: List[Tuple[str, dict, float]] = []
+            for wid, wf_json, score in rows:
+                try:
+                    wf = wf_json if isinstance(wf_json, dict) else wf_json  # psycopg returns python object
+                except Exception:
+                    wf = {}
+                results.append((str(wid), wf, float(score)))
+            return results
+
+    def bump_procedural_usage(self, workflow_id: str, by: int = 1) -> int:
+        with self.connect() as conn, conn.cursor() as cur:
+            cur.execute("UPDATE procedural_memory SET usage_count = usage_count + %s WHERE workflow_id = %s", (by, workflow_id))
+            return cur.rowcount or 0

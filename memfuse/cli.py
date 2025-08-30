@@ -19,10 +19,16 @@ def main() -> None:
     ingest.add_argument("source", help="Document source label")
     ingest.add_argument("path", help="Path to text file")
 
-    chat = sub.add_parser("chat", help="Start a chat turn")
+    chat = sub.add_parser("chat", help="Start a chat turn (RAG only)")
     chat.add_argument("session", help="Session id")
     chat.add_argument("query", help="User query or '-' for interactive mode")
     chat.add_argument("--verbose", action="store_true", help="Show detailed context operations")
+
+    # Orchestrated task runner (Phase 3/4)
+    task = sub.add_parser("task", help="Run orchestrated multi-agent task")
+    task.add_argument("session", help="Session id")
+    task.add_argument("goal", help="High-level user goal or '-' for interactive mode")
+    task.add_argument("--verbose", action="store_true", help="Show planner and agent steps")
 
     debug = sub.add_parser("debug", help="Debug retrieval and context (no LLM call)")
     debug.add_argument("session", help="Session id")
@@ -38,6 +44,8 @@ def main() -> None:
 
     settings = Settings.from_env()
     service = RAGService.from_settings(settings)
+    # Lazy import to avoid circulars if user never runs task
+    orchestrator = None
 
     if args.cmd == "ingest":
         try:
@@ -139,6 +147,38 @@ def main() -> None:
                 sys.exit(2)
             console = Console()
             console.print("[bold magenta]Chatbot>[/bold magenta] " + answer)
+    elif args.cmd == "task":
+        from .orchestrator import Orchestrator
+        if orchestrator is None:
+            orchestrator = Orchestrator.from_settings(settings)
+        console = Console()
+        if args.goal == "-":
+            console.print("[bold green]MemFuse Orchestrator[/bold green] - type /exit to quit", highlight=False)
+            while True:
+                try:
+                    goal = console.input("[bold cyan]Goal>[/bold cyan] ")
+                except (KeyboardInterrupt, EOFError):
+                    console.print("\n[dim]Bye[/dim]")
+                    break
+                if goal.strip() in {"/exit", ":q", "/quit"}:
+                    console.print("[dim]Bye[/dim]")
+                    break
+                try:
+                    result = orchestrator.handle_request(args.session, goal, verbose=args.verbose)
+                except Exception as e:
+                    console.print(f"[red]Task failed:[/red] {e}")
+                    continue
+                console.print(Panel(result, title="[bold magenta]Result[/bold magenta]", border_style="magenta"))
+        else:
+            try:
+                if orchestrator is None:
+                    orchestrator = Orchestrator.from_settings(settings)
+                result = orchestrator.handle_request(args.session, args.goal, verbose=args.verbose)
+            except Exception as e:
+                print(f"Task failed: {e}", file=sys.stderr)
+                sys.exit(2)
+            console = Console()
+            console.print(Panel(result, title="[bold magenta]Result[/bold magenta]", border_style="magenta"))
     elif args.cmd == "debug":
         # Step 1: history
         history = service.db.fetch_conversation_history(session_id=args.session)

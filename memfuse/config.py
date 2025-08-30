@@ -42,6 +42,11 @@ class Settings:
     extractor_trigger_tokens: int
     extractor_dedup_top_k: int
 
+    # Phase 4 features (Procedural Memory / Multi-Agent)
+    m3_enabled: bool = False
+    procedural_top_k: int = 5
+    procedural_reuse_threshold: float = 0.9
+
     @staticmethod
     def from_env() -> "Settings":
         load_env()
@@ -85,4 +90,8 @@ class Settings:
             extractor_enabled=(os.getenv("EXTRACTOR_ENABLED", "false").lower() in {"1","true","yes","y"}),
             extractor_trigger_tokens=int(os.getenv("EXTRACTOR_TRIGGER_TOKENS", "2000")),
             extractor_dedup_top_k=int(os.getenv("EXTRACTOR_DEDUP_TOP_K", "10")),
+            # Phase 4 defaults
+            m3_enabled=(os.getenv("M3_ENABLED", "false").lower() in {"1","true","yes","y"}),
+            procedural_top_k=int(os.getenv("PROCEDURAL_TOP_K", "5")),
+            procedural_reuse_threshold=float(os.getenv("PROCEDURAL_REUSE_THRESHOLD", "0.9")),
         )

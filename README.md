@@ -1,4 +1,4 @@
-MemFuse MVP - Phase 1 → Phase 2 Ready
+MemFuse MVP - Phase 1 → Phase 4 Ready
 
 Prerequisites
 - Poetry (Python 3.11)
@@ -61,6 +61,23 @@ Phase 2 (Structured Memory) quick start
   poetry run python scripts/test_facts_recall.py
   ```
 
+Phase 3 (Multi-Agent) quick start
+- Orchestrated tasks:
+  ```bash
+  poetry run memfuse task sess1 "Analyze sample data and draft a report"
+  # Interactive orchestrator
+  poetry run memfuse task sess1 -
+  ```
+
+Phase 4 (Procedural Memory) quick start
+- Enable M3 in `.env`:
+  ```bash
+  M3_ENABLED=true
+  PROCEDURAL_REUSE_THRESHOLD=0.9
+  ```
+- After a successful orchestrated run, the workflow is learned and stored.
+- Subsequent similar goals will be fast-pathed via reuse if similarity ≥ threshold.
+
 Notes on performance & robustness
 - Ingestion and session indexing are idempotent by content hash. Re-ingesting or re-chatting will not duplicate vector rows.
 - DB schema creates a unique index on `(document_source, content_hash)` under `documents_chunks`.
@@ -72,7 +89,7 @@ Schema changes & migration
   ```bash
   scripts/start.sh --reset
   ```
-  to recreate schema and apply the unique index.
+  to recreate schema and apply the unique index and M3 schema.
 
 Debugging (no LLM call)
 ```bash
@@ -115,4 +132,14 @@ Notes
 Testing
 ```bash
 poetry run pytest -q
+```
+
+End-to-end scripts
+```bash
+# Start DB
+scripts/start.sh
+# E2E for Phase 3
+poetry run python scripts/e2e_phase3.py
+# E2E for Phase 4 (requires M3_ENABLED=true and valid keys)
+poetry run python scripts/e2e_phase4.py
 ```

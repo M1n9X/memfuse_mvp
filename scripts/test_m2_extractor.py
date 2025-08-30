@@ -5,9 +5,13 @@ import os
 import sys
 import time
 import uuid
+import pytest
 from typing import List, Tuple
 
 from memfuse.config import Settings
+
+# Always skip this module under pytest discovery; this is a script-style E2E.
+pytestmark = pytest.mark.skip("script-based extractor E2E; run via `poetry run python scripts/test_m2_extractor.py`")
 from memfuse.rag import RAGService
 from memfuse.tokenizer import count_tokens
 

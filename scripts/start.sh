@@ -46,5 +46,7 @@ echo "[MemFuse] Ensuring pgvector extension and schema are ready..."
 docker exec memfuse_db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -tAc "CREATE EXTENSION IF NOT EXISTS vector;" >/dev/null 2>&1 || true
 # Re-run schema scripts in case of reset or manual image switch
 docker exec memfuse_db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -f /docker-entrypoint-initdb.d/010-schema.sql >/dev/null 2>&1 || true
+docker exec memfuse_db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -f /docker-entrypoint-initdb.d/020-structured-memory.sql >/dev/null 2>&1 || true
+docker exec memfuse_db psql -U "${POSTGRES_USER}" -d "${POSTGRES_DB}" -f /docker-entrypoint-initdb.d/030-procedural-memory.sql >/dev/null 2>&1 || true
 
 echo "[MemFuse] DB is ready: ${POSTGRES_USER}@localhost/${POSTGRES_DB}"
