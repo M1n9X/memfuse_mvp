@@ -342,6 +342,26 @@ class Orchestrator:
             except Exception:
                 pass
         _write_json("input", {"session_id": session_id, "goal": user_goal})
+        # Pre-exec: retrieve lessons similar to the goal to seed parameters and avoid past pitfalls
+        pre_lessons: Dict[str, Any] = {}
+        try:
+            vec = self.embedder.embed([user_goal])[0]
+            # top-5 generic lessons regardless of agent; specific agent retrieval happens inside executor
+            pre_lessons_list = self.db.query_lessons_similar(vec, agent=None, top_k=5)
+            pre_lessons = {
+                "total": len(pre_lessons_list),
+                "success": [
+                    {"lesson_id": lid, "fix_summary": fix, "working_params": wparams, "score": score}
+                    for (lid, status, fix, wparams, score) in pre_lessons_list if status == 'success'
+                ],
+                "fail": [
+                    {"lesson_id": lid, "fix_summary": fix, "working_params": wparams, "score": score}
+                    for (lid, status, fix, wparams, score) in pre_lessons_list if status == 'fail'
+                ],
+            }
+        except Exception:
+            pre_lessons = {}
+        _write_json("pre_lessons", pre_lessons)
         # Step 0: try reuse
         wid, steps = self._reuse_from_m3(user_goal)
         reused = False
@@ -385,6 +405,58 @@ class Orchestrator:
             except Exception:
                 pass
 
+        # Post-exec: reflective summarization of lessons across steps
+        try:
+            system = (
+                "You are a reflection engine. Given step-wise attempts (inputs, outputs, success flags), "
+                "summarize failure patterns -> fixes mapping and generalizable lessons. Return strict JSON:\n"
+                "{\n  \"fail_patterns\": [{\"agent\":..., \"pattern\":..., \"recommended_fix\":..., \"example_input\":{...}}],\n"
+                "  \"success_snippets\": [{\"agent\":..., \"working_params\":{...}}]\n}"
+            )
+            # Build compact evidence: last 1-2 attempts per step
+            evidence: Dict[str, Any] = {}
+            for k, v in context.items():
+                if not k.startswith('step_'):
+                    continue
+                # already persisted traces per step; read back from disk for rich details
+                try:
+                    data = json.loads((run_dir / f"{k}.json").read_text())
+                    evidence[k] = {
+                        "agent": data.get("agent"),
+                        "attempts_tail": data.get("attempts", [])[-2:],
+                        "final_success": data.get("final_success"),
+                    }
+                except Exception:
+                    pass
+            reflect_raw = self.llm.completion_json(system, json.dumps(evidence, ensure_ascii=False))
+            reflect = json.loads(reflect_raw or '{}')
+            (run_dir / "reflection.json").write_text(json.dumps(reflect, ensure_ascii=False, indent=2))
+            # Persist distilled lessons (success snippets and key fixes) for future retrieval
+            try:
+                vec = self.embedder.embed([user_goal])[0]
+                # success snippets
+                for snip in reflect.get('success_snippets', []) or []:
+                    if not isinstance(snip, dict):
+                        continue
+                    agent = str(snip.get('agent') or '')
+                    wparams = snip.get('working_params') or {}
+                    if agent:
+                        self.db.insert_lesson(vec, user_goal, agent, 'success', None, '', wparams)
+                # fail patterns -> fixes
+                for pat in reflect.get('fail_patterns', []) or []:
+                    if not isinstance(pat, dict):
+                        continue
+                    agent = str(pat.get('agent') or '')
+                    fix = str(pat.get('recommended_fix') or '')
+                    ex = pat.get('example_input') or {}
+                    err = str(pat.get('pattern') or '')[:500]
+                    if agent:
+                        self.db.insert_lesson(vec, user_goal, agent, 'fail', err, fix, ex)
+            except Exception:
+                pass
+        except Exception:
+            pass
+
         # Bump usage if reused
         if reused and wid:
             try:
@@ -410,15 +482,29 @@ class AgentExecutor:
     - Return the final output and the full trace including all attempts
     """
 
-    def __init__(self, settings: Settings, llm: ChatLLM, agents: Dict[str, Any]):
+    def __init__(self, settings: Settings, llm: ChatLLM, agents: Dict[str, Any], verbose: bool = False):
         self.settings = settings
         self.llm = llm
         self.agents = agents
         self.embedder = JinaEmbeddingClient(settings)
         self.db = Database.from_settings(settings)
+        self.verbose = verbose
 
     def _propose_input(self, agent_name: str, user_goal: str, context: Dict[str, Any], prior_attempt: Dict[str, Any] | None) -> Dict[str, Any]:
         schema_hint = AGENT_SCHEMAS.get(agent_name, {})
+        # Retrieve agent-specific lessons to seed parameter proposal
+        success_params: list[dict] = []
+        avoid_patterns: list[str] = []
+        try:
+            vec = self.embedder.embed([user_goal])[0]
+            lessons = self.db.query_lessons_similar(vec, agent=agent_name, top_k=5)
+            for _lid, status, fix, wparams, _score in lessons:
+                if status == 'success' and isinstance(wparams, dict):
+                    success_params.append(wparams)
+                elif status == 'fail' and fix:
+                    avoid_patterns.append(str(fix))
+        except Exception:
+            pass
         system = (
             "You are an autonomous executor parameterizer.\n"
             "Given the high-level goal and partial context, propose the next action input strictly as JSON.\n"
@@ -430,12 +516,19 @@ class AgentExecutor:
             "schema_hint": schema_hint,
             "last_attempt": prior_attempt or {},
             "context_keys": list(context.keys())[-8:],
+            "success_params": success_params[:3],
+            "avoid_patterns": avoid_patterns[:3],
         })
         try:
             raw = self.llm.completion_json(system, user)
             data = json.loads(raw or '{}')
             if isinstance(data, dict):
-                return data
+                # Merge with known good params if LLM returns partial
+                merged = {}
+                for sp in success_params[:1]:
+                    merged.update(sp)
+                merged.update(data)
+                return merged
         except Exception:
             pass
         # Minimal fallback if LLM fails: derive query from goal
@@ -511,6 +604,17 @@ class AgentExecutor:
                 out = {"error": str(e)}
             elapsed = time.time() - start
             success = self._judge_success(step.agent, out)
+            if self.verbose:
+                print(f"[Agent:{step.agent}] attempt={attempt} success={success} elapsed={elapsed:.2f}s")
+                try:
+                    print(f"  input~ {json.dumps({k:v for k,v in exec_payload.items() if k!='context'}, ensure_ascii=False)[:500]}")
+                except Exception:
+                    pass
+                try:
+                    prev = json.dumps(out, ensure_ascii=False)
+                    print(f"  output~ {prev[:500]}{'...' if len(prev)>500 else ''}")
+                except Exception:
+                    pass
             # Record trace attempt (summarized)
             trace_attempt = {
                 "attempt": attempt,

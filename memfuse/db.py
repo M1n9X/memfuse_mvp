@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import contextlib
+import uuid
 from dataclasses import dataclass
 from typing import Iterator, Optional, List, Tuple
 

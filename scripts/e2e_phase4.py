@@ -15,11 +15,17 @@ def main() -> None:
     os.environ.setdefault("M3_ENABLED", "true")
     goal = os.environ.get("MF_GOAL", "针对大模型/Agent的Memory综述：综合duckduckgo与arxiv近1个月Top10；自动规划")
     print("[E2E-Phase4] First run (learn workflow)...")
-    out1 = run([sys.executable, "-m", "memfuse.cli", "task", session, goal])
-    print(out1)
+    p1 = subprocess.Popen([sys.executable, "-m", "memfuse.cli", "task", session, goal], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    assert p1.stdout is not None
+    for line in p1.stdout:
+        print(line, end="")
+    p1.wait()
     print("[E2E-Phase4] Second run (reuse workflow if similar)...")
-    out2 = run([sys.executable, "-m", "memfuse.cli", "task", session, goal])
-    print(out2)
+    p2 = subprocess.Popen([sys.executable, "-m", "memfuse.cli", "task", session, goal], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+    assert p2.stdout is not None
+    for line in p2.stdout:
+        print(line, end="")
+    p2.wait()
     print("[E2E-Phase4] DONE")
 
 
