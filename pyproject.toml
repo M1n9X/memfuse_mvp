@@ -15,14 +15,18 @@ openai = "^1.51.2"
 python-dotenv = "^1.0.1"
 tiktoken = "^0.7.0"
 rich = "^13.9.4"
+fastapi = "^0.104.1"
+uvicorn = {version = "^0.24.0", extras = ["standard"]}
 
 [tool.poetry.group.dev.dependencies]
 pytest = "^8.3.2"
 responses = "^0.25.3"
 pytest-mock = "^3.14.0"
+httpx = "^0.25.0"
 
 [tool.poetry.scripts]
 memfuse = "memfuse.cli:main"
+memfuse-api = "scripts.start_api_server:main"
 
 [build-system]
 requires = ["poetry-core"]

@@ -35,7 +35,7 @@ class Planner:
             "Rules: Keep 3-6 steps. Use RAG for internal/external indexed knowledge, WebSearch for the live web, DB for SQL, Report for final summarization.\n"
         )
         user = f"Goal: {user_goal}\nProduce steps now."
-        attempts = max(1, int(getattr(self.settings, 'planner_max_attempts', 3)))
+        attempts = max(1, int(getattr(self.settings, 'planner_max_attempts', 2)))
         history: List[dict] = []
         for i in range(1, attempts + 1):
             try:
@@ -644,8 +644,8 @@ class AgentExecutor:
 
             # Prepare refinement hint for next attempt
             prior = {"input": trace_attempt["input"], "output": out_preview}
-            # Light back-off to avoid immediate rate limiting
-            time.sleep(min(2.0, 0.5 * attempt))
+            # Reduced back-off for faster execution
+            time.sleep(min(1.0, 0.2 * attempt))
         else:
             final_out = out  # last
             # Persist a failure lesson with last attempt snapshot
