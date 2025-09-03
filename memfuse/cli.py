@@ -81,6 +81,11 @@ def main() -> None:
                     continue
                 # Verbose context operations
                 if args.verbose and trace is not None:
+                    # Clear previous screen to avoid mixed old/new outputs
+                    try:
+                        console.clear()
+                    except Exception:
+                        pass
                     console.rule("Context Operations")
                     # Show full assembled context blocks
                     from textwrap import shorten
@@ -98,8 +103,8 @@ def main() -> None:
                     if trace.history_rounds_after:
                         kept_lines = []
                         for role, content in trace.history_kept_messages[-6:]:
-                            who = 'You' if role=='user' else 'Chatbot'
-                            kept_lines.append(f"{who}> {content}")
+                            label = '[cyan]You[/cyan]' if role == 'user' else '[magenta]Assistant[/magenta]'
+                            kept_lines.append(f"{label} {content}")
                         hist_title = f"[bold yellow]History[/bold yellow] (kept {trace.history_rounds_after} rounds)"
                         console.print(Panel("\n".join(kept_lines) if kept_lines else "<none>", title=hist_title, border_style="yellow"))
                     if trace.user_truncated:
@@ -133,8 +138,8 @@ def main() -> None:
                         fc_lines.append(f"[{i}] ({role}) {content}")
                     console.print(Panel("\n".join(fc_lines), title="[bold magenta]Final Context (raw, order to LLM)[/bold magenta]", border_style="magenta"))
                     console.rule()
-                # Print full answer without fake streaming
-                console.print("[bold magenta]Chatbot>[/bold magenta] " + answer)
+                # Print full answer in a distinct panel
+                console.print(Panel(answer, title="[bold magenta]Assistant[/bold magenta]", border_style="magenta", style="yellow"))
         else:
             try:
                 answer = service.chat(args.session, args.query)
@@ -142,7 +147,7 @@ def main() -> None:
                 print(f"Chat failed: {e}", file=sys.stderr)
                 sys.exit(2)
             console = Console()
-            console.print("[bold magenta]Chatbot>[/bold magenta] " + answer)
+            console.print(Panel(answer, title="[bold magenta]Assistant[/bold magenta]", border_style="magenta", style="yellow"))
     elif args.cmd == "task":
         from .orchestrator import Orchestrator
         if orchestrator is None:
