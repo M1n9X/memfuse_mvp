@@ -15,6 +15,8 @@ openai = "^1.51.2"
 python-dotenv = "^1.0.1"
 tiktoken = "^0.7.0"
 rich = "^13.9.4"
+click = "^8.1.7"
+prompt-toolkit = "^3.0.47"
 fastapi = "^0.104.1"
 uvicorn = {version = "^0.24.0", extras = ["standard"]}
 

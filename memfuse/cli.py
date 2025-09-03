@@ -3,6 +3,10 @@ from __future__ import annotations
 import argparse
 import sys
 
+import click
+from prompt_toolkit import PromptSession
+from prompt_toolkit.key_binding import KeyBindings
+from prompt_toolkit.shortcuts import confirm
 from .config import Settings
 from .rag import RAGService
 from rich.console import Console
@@ -60,16 +64,81 @@ def main() -> None:
         console = Console()
         # Interactive mode if query is '-'
         if args.query == "-":
-            console.print("[bold green]MemFuse Chat[/bold green] - type /exit to quit", highlight=False)
+            # Create prompt session with multiline support
+            console.print("[bold green]MemFuse Chat[/bold green]", highlight=False)
+            console.print("[dim]• Single line: Just type and press Enter[/dim]")
+            console.print("[dim]• Multiline: Type your text, press Alt+Enter or Esc then Enter to submit[/dim]") 
+            console.print("[dim]• Editor: Type /edit to open your default editor[/dim]")
+            console.print("[dim]• Exit: Type /exit, /quit, or :q to quit[/dim]")
+            
+            # Create custom key bindings
+            bindings = KeyBindings()
+            
+            @bindings.add('c-q')  # Ctrl+Q to quit
+            def _(event):
+                event.app.exit(result='__quit__')
+            
+            # Create prompt session with multiline support
+            session = PromptSession(
+                message="You> ",
+                multiline=True,  # Enable multiline input
+                key_bindings=bindings
+            )
+            
             while True:
                 try:
-                    user_q = console.input("[bold cyan]You>[/bold cyan] ")
-                except (KeyboardInterrupt, EOFError):
+                    # Get user input (supports multiline paste and arrow keys)
+                    user_q = session.prompt()
+                    
+                    # Handle special commands
+                    if user_q.strip() in {"/exit", ":q", "/quit", "__quit__"}:
+                        console.print("[dim]Bye[/dim]")
+                        break
+                    
+                    # Handle multiline edit command  
+                    if user_q.strip() == "/edit":
+                        console.print("[dim]Opening editor for multiline input...[/dim]")
+                        try:
+                            # Use click.edit() to open user's default editor
+                            multiline_content = click.edit('\n\n# Type your message above this line.\n# Lines starting with # are ignored.\n')
+                            if multiline_content is not None:
+                                # Remove the marker and any content after it, clean up the input
+                                content_lines = multiline_content.split('\n')
+                                message_lines = []
+                                for line in content_lines:
+                                    if line.strip().startswith('# '):
+                                        break  # Stop at marker line
+                                    message_lines.append(line)
+                                user_q = '\n'.join(message_lines).strip()
+                                
+                                if not user_q:  # Empty content after cleaning
+                                    console.print("[yellow]No content entered, skipping.[/yellow]")
+                                    continue
+                                
+                                # Show what was captured (truncated for display)
+                                preview = user_q.replace('\n', '\\n')
+                                if len(preview) > 100:
+                                    preview = preview[:100] + "..."
+                                console.print(f"[dim]Captured: {preview}[/dim]")
+                            else:
+                                console.print("[yellow]Editor cancelled, skipping.[/yellow]")
+                                continue
+                        except Exception as e:
+                            console.print(f"[red]Editor error:[/red] {e}")
+                            continue
+                    
+                    # Skip empty input
+                    if not user_q.strip():
+                        continue
+                        
+                except KeyboardInterrupt:
+                    # Ctrl+C pressed
+                    continue  # Don't quit on Ctrl+C, just start new prompt
+                except EOFError:
+                    # Ctrl+D pressed
                     console.print("\n[dim]Bye[/dim]")
                     break
-                if user_q.strip() in {"/exit", ":q", "/quit"}:
-                    console.print("[dim]Bye[/dim]")
-                    break
+                
                 # In verbose mode, clear immediately so old outputs don't linger
                 if args.verbose:
                     try:
