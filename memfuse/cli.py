@@ -73,7 +73,7 @@ def main() -> None:
                 # Build optional trace
                 from .tracing import ContextTrace
                 trace = ContextTrace() if args.verbose else None
-                # Call non-streaming backend for now; print as streaming chunks
+                # Call non-streaming backend and print normally
                 try:
                     answer = service.chat(args.session, user_q, trace=trace)
                 except Exception as e:
@@ -133,12 +133,8 @@ def main() -> None:
                         fc_lines.append(f"[{i}] ({role}) {content}")
                     console.print(Panel("\n".join(fc_lines), title="[bold magenta]Final Context (raw, order to LLM)[/bold magenta]", border_style="magenta"))
                     console.rule()
-                # Fake streaming: chunk the answer for UX
-                console.print("[bold magenta]Chatbot>[/bold magenta] ", end="")
-                for part in answer.split():
-                    console.print(part + " ", end="", style="yellow")
-                    console.file.flush()
-                console.print("\n")
+                # Print full answer without fake streaming
+                console.print("[bold magenta]Chatbot>[/bold magenta] " + answer)
         else:
             try:
                 answer = service.chat(args.session, args.query)
