@@ -70,6 +70,12 @@ def main() -> None:
                 if user_q.strip() in {"/exit", ":q", "/quit"}:
                     console.print("[dim]Bye[/dim]")
                     break
+                # In verbose mode, clear immediately so old outputs don't linger
+                if args.verbose:
+                    try:
+                        console.clear()
+                    except Exception:
+                        pass
                 # Build optional trace
                 from .tracing import ContextTrace
                 trace = ContextTrace() if args.verbose else None
@@ -81,11 +87,6 @@ def main() -> None:
                     continue
                 # Verbose context operations
                 if args.verbose and trace is not None:
-                    # Clear previous screen to avoid mixed old/new outputs
-                    try:
-                        console.clear()
-                    except Exception:
-                        pass
                     console.rule("Context Operations")
                     # Show full assembled context blocks
                     from textwrap import shorten
